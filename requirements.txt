@@ -1,0 +1,23 @@
+# --- 1. Core MoViNet Dependencies (Version 2.15.0) ---
+# Đã xác nhận từ file gốc của bạn.
+keras==2.15.0
+tensorflow==2.15.0
+tf-models-official==2.15.0
+tensorflow_hub
+
+# Xử lý Video/Ảnh
+opencv-python-headless>=4.5.2.52  # Giữ lại bản Headless cho Server
+imageio
+mediapy
+moviepy
+scikit-image
+scikit-learn
+tqdm
+# remotezip, gdown, git+..., seaborn, IPython đã bị loại bỏ vì không cần cho inference API
+
+# --- 2. Production API & Queue ---
+fastapi
+uvicorn[standard]  # Web server
+python-multipart   # Để xử lý upload file video
+celery             # Hàng đợi
+redis              # Broker cho Celery
