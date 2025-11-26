@@ -28,7 +28,7 @@ def run_camera_process(camera_id, rtsp_url):
     cap = cv2.VideoCapture(rtsp_url)
     
     prev_time = 0
-    fps_limit = 10  # Giới hạn FPS xử lý để tiết kiệm GPU
+    fps_limit = 30  # Giới hạn FPS xử lý để tiết kiệm GPU
     frame_count = 0
     RESET_INTERVAL = 5000 # Reset state sau mỗi 5000 frames (~8 phút)
     
