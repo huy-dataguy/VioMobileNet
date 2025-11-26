@@ -3,22 +3,19 @@ version: '3.8'
 services:
   redis:
     image: redis:alpine
-    ports:
-      - "6379:6379"
+    ports: ["6379:6379"]
 
   api:
     build: .
+    image: viomobilenet-system
     command: uvicorn app:app --host 0.0.0.0 --port 8000
-    ports:
-      - "8000:8000"
+    ports: ["8000:8000"]
     volumes:
       - ./uploads:/app/uploads
-    depends_on:
-      - redis
-
-  worker:
-    build: .
-    # Quan trọng: Cấu hình để Worker dùng GPU
+      # KHÔNG mount models ở đây để tránh lỗi overwrite
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+    # Cấp quyền GPU cho API để nó chạy RTSP Process
     deploy:
       resources:
         reservations:
@@ -26,47 +23,27 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
+    # Tăng Shared Memory để multiprocessing hoạt động tốt
+    shm_size: '4gb' 
+    depends_on:
+      - redis
+
+  worker:
+    build: .
+    image: viomobilenet-system
+    # Dùng pool=solo để tránh lỗi CUDA Context
     command: celery -A worker.celery_app worker --loglevel=info --pool=solo
     volumes:
       - ./uploads:/app/uploads
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    shm_size: '4gb'
     depends_on:
       - redis
-
-
-
-# version: '3.8'
-
-# services:
-#   redis:
-#     image: redis:alpine
-#     ports:
-#       - "6379:6379"
-
-#   api:
-#     build: .
-#     command: uvicorn app:app --host 0.0.0.0 --port 8000
-#     ports:
-#       - "8000:8000"
-#     volumes:
-#       - ./uploads:/app/uploads
-#     depends_on:
-#       - redis
-
-#   worker:
-#     build: .
-#     command: celery -A worker.celery_app worker --loglevel=info --concurrency=1
-#     volumes:
-#       - ./uploads:/app/uploads
-#       - ./models:/app/models
-
-#     # GPU CHUẨN CHO DOCKER COMPOSE
-#     deploy: {}  # tránh docker error khi bạn dùng Swarm config mà không chạy Swarm
-
-#     runtime: nvidia
-#     environment:
-#       - NVIDIA_VISIBLE_DEVICES=all
-
-#     depends_on:
-#       - redis
