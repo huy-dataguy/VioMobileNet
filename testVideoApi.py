@@ -14,7 +14,7 @@ def test_upload():
     try:
         with open(VIDEO_PATH, "rb") as f:
             # Gửi POST request tới endpoint /detect
-            response = requests.post(f"{API_URL}/detect", files={"file": f})
+            response = requests.post(f"{API_URL}/detect_video", files={"file": f})
             
         if response.status_code != 200:
             print(f"Lỗi Upload: {response.text}")
