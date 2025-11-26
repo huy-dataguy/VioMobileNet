@@ -29,7 +29,6 @@ services:
     command: celery -A worker.celery_app worker --loglevel=info --concurrency=1
     volumes:
       - ./uploads:/app/uploads
-      - ./models:/app/models
     environment:
       - NVIDIA_VISIBLE_DEVICES=all
     depends_on:

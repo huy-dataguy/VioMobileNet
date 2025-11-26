@@ -20,4 +20,4 @@ fastapi
 uvicorn[standard]  # Web server
 python-multipart   # Để xử lý upload file video
 celery             # Hàng đợi
-redis              # Broker cho Celery
+redis==4.6.0

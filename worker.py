@@ -10,7 +10,7 @@ celery_app = Celery('video_tasks', broker='redis://redis:6379/0', backend='redis
 
 # 2. Cấu hình Model
 # Lưu ý: Đảm bảo đường dẫn weights đúng trong Docker (ví dụ: /app/weights/...)
-CHECKPOINT_DIR = './models/trained_models_dropout_autolr_trlayers_NoAug/movinet_a3_12fps_64bs_0.001lr_0.3dr_0tl/'
+CHECKPOINT_DIR = './models/movinet_a3_12fps_64bs_0.001lr_0.3dr_0tl/'
 MODEL_ID = 'a3'
 TARGET_FPS = 12
 RESOLUTION = 256
