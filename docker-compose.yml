@@ -26,7 +26,7 @@ services:
             - driver: nvidia
               count: 1
               capabilities: [gpu]
-    command: celery -A worker.celery_app worker --loglevel=info --concurrency=1
+    command: celery -A worker.celery_app worker --loglevel=info --pool=solo
     volumes:
       - ./uploads:/app/uploads
     environment:
