@@ -12,7 +12,7 @@ from core import build_model_optimized, preprocess_frame, run_inference_step
 r = redis.Redis(host='redis', port=6379, db=0)
 
 def run_camera_process(camera_id, rtsp_url):
-    print(f"--- [RTSP WORKER {camera_id}] STARTING WITH SCENE DETECT ---")
+    print(f"--- [RTSP WORKER {camera_id}] STARTING FINAL PRODUCTION ---")
     
     # 1. Config GPU
     gpus = tf.config.list_physical_devices('GPU')
@@ -21,6 +21,7 @@ def run_camera_process(camera_id, rtsp_url):
             tf.config.experimental.set_memory_growth(gpu, True)
         except: pass
 
+    # 2. Load Model
     model = build_model_optimized()
     
     def get_clean_state():
@@ -29,14 +30,15 @@ def run_camera_process(camera_id, rtsp_url):
     states = get_clean_state()
     cap = cv2.VideoCapture(rtsp_url)
     
+    # --- CẤU HÌNH ---
     TARGET_FPS = 12 
     frame_duration = 1.0 / TARGET_FPS
     prev_inference_time = 0
     score_buffer = deque(maxlen=5) 
     
-    # Biến để so sánh Scene Change
-    prev_frame_gray = None 
-    SCENE_CHANGE_THRESHOLD = 30.0 # Ngưỡng thay đổi pixel (càng nhỏ càng nhạy)
+    # Cấu hình Scene Detect (Chống nhiễu khi rung lắc/che cam)
+    prev_frame_gray = None
+    SCENE_CHANGE_THRESHOLD = 35.0 # Ngưỡng phát hiện thay đổi đột ngột
     
     frame_count = 0
     RESET_INTERVAL = 3000
@@ -47,40 +49,43 @@ def run_camera_process(camera_id, rtsp_url):
             
         ret, frame = cap.read()
         if not ret:
-            print(f"[{camera_id}] Lost signal...")
+            print(f"[{camera_id}] Mất tín hiệu, thử lại...")
             time.sleep(2)
             cap = cv2.VideoCapture(rtsp_url)
             states = get_clean_state()
+            score_buffer.clear()
+            prev_frame_gray = None
             continue
             
         now = time.time()
+        # Chỉ chạy đúng 12 FPS
         if now - prev_inference_time < frame_duration:
             continue
         prev_inference_time = now
         
-        # --- THUẬT TOÁN PHÁT HIỆN CHUYỂN CẢNH (SCENE CUT) ---
-        # 1. Resize nhỏ để tính toán cho nhanh
-        small_frame = cv2.resize(frame, (64, 64))
-        gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
-        
+        # --- 1. PHÁT HIỆN SỐC HÌNH ẢNH (SCENE CHANGE) ---
         reset_trigger = False
-        if prev_frame_gray is not None:
-            # Tính độ sai lệch giữa frame hiện tại và frame trước
-            score_diff = cv2.absdiff(gray, prev_frame_gray)
-            mean_diff = np.mean(score_diff)
+        try:
+            # Resize siêu nhỏ để so sánh nhanh
+            small_frame = cv2.resize(frame, (64, 64))
+            gray = cv2.cvtColor(small_frame, cv2.COLOR_BGR2GRAY)
             
-            # Nếu khác biệt quá lớn -> Có sự chuyển cảnh (Video này qua Video kia)
-            if mean_diff > SCENE_CHANGE_THRESHOLD:
-                print(f"[{camera_id}] 🎬 SCENE CHANGE DETECTED (Diff: {mean_diff:.2f}) -> RESET STATE")
-                states = get_clean_state() # Xóa ký ức cũ ngay lập tức
-                score_buffer.clear()       # Xóa buffer điểm số cũ
-                reset_trigger = True
-        
-        prev_frame_gray = gray
-        # -------------------------------------------------------
+            if prev_frame_gray is not None:
+                score_diff = cv2.absdiff(gray, prev_frame_gray)
+                mean_diff = np.mean(score_diff)
+                
+                # Nếu thay đổi quá lớn (che cam, quay cam đi chỗ khác)
+                if mean_diff > SCENE_CHANGE_THRESHOLD:
+                    print(f"[{camera_id}] ⚡ Đổi cảnh đột ngột (Diff: {mean_diff:.1f}) -> Reset Memory")
+                    states = get_clean_state() # Xóa ký ức cũ
+                    score_buffer.clear()
+                    reset_trigger = True
+            
+            prev_frame_gray = gray
+        except: pass
+        # ------------------------------------------------
 
         frame_count += 1
-        # Reset định kỳ (nếu không có scene change)
         if frame_count >= RESET_INTERVAL and not reset_trigger:
             states = get_clean_state()
             score_buffer.clear()
@@ -88,35 +93,38 @@ def run_camera_process(camera_id, rtsp_url):
             gc.collect()
             
         try:
+            # Preprocess
             inp = preprocess_frame(frame)
             inputs = {'image': inp}
+            
+            # Inference
             logits, states = run_inference_step(model, inputs, states)
             
             probs = tf.nn.softmax(logits)
             raw_prob = float(probs[0][0])
             
-            # Nếu vừa reset scene, đừng vội nạp vào buffer ngay, đợi 1-2 frame ổn định
+            # --- SMOOTHING ---
+            # Nếu vừa bị reset do sốc hình ảnh, khoan hãy tin kết quả ngay
             if not reset_trigger:
                 score_buffer.append(raw_prob)
             
+            avg_prob = 0.0
             if len(score_buffer) > 0:
                 avg_prob = sum(score_buffer) / len(score_buffer)
             else:
-                avg_prob = raw_prob
+                avg_prob = raw_prob # Fallback nếu buffer rỗng
 
-            # --- Gửi ảnh về (như cũ) ---
-            height, width = frame.shape[:2]
-            new_width = 480
-            new_height = int(height * (new_width / width))
-            frame_small = cv2.resize(frame, (new_width, new_height))
-            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 60]
-            _, buffer = cv2.imencode('.jpg', frame_small, encode_param)
+            # --- GỬI VỀ CLIENT ---
+            frame_view = cv2.resize(frame, (480, 270)) # Resize nhỏ hơn chút nữa cho nhanh
+            encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 50] # Giảm chất lượng xuống 50%
+            _, buffer = cv2.imencode('.jpg', frame_view, encode_param)
             jpg_as_text = base64.b64encode(buffer).decode('utf-8')
             
             result = {
                 "camera_id": camera_id,
                 "fight_prob": avg_prob,
-                "is_violent": avg_prob > 0.7,
+                "raw_prob": raw_prob,
+                "is_violent": avg_prob > 0.7, # Ngưỡng báo động
                 "timestamp": now,
                 "image_base64": jpg_as_text
             }
@@ -129,6 +137,7 @@ def run_camera_process(camera_id, rtsp_url):
         except Exception as e:
             print(f"Error: {e}")
             states = get_clean_state()
+            score_buffer.clear()
 
     cap.release()
     r.delete(f"cam_status_{camera_id}")
