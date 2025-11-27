@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Clone repo + pull model
+# Clone repo & setup models (Chỉ chạy 1 lần khi build)
 RUN git lfs install && \
     git clone https://huggingface.co/dataguychill/MoViNet4Violence-Detection-Backup && \
     cd MoViNet4Violence-Detection-Backup && \
@@ -25,4 +25,5 @@ RUN git lfs install && \
 
 COPY . .
 
+# Lệnh CMD mặc định (sẽ bị docker-compose override)
 CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
