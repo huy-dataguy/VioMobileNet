@@ -7,8 +7,7 @@ import sys
 
 # IP VPS
 # URL = "http://103.78.3.29:8000/camera/status/cam1"
-URL = "http://103.78.3.29:8000/camera/status/liveFight"
-
+URL = "http://103.78.3.29:8000/camera/status/webcam_test"
 def monitor_gui():
     print("🚀 Đang khởi tạo màn hình giám sát (OpenCV)...")
     
