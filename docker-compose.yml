@@ -46,3 +46,8 @@ services:
     shm_size: '4gb'
     depends_on:
       - redis
+
+  mediamtx:
+      image: bluenviron/mediamtx:latest
+      container_name: mediamtx
+      network_mode: host

@@ -21,3 +21,4 @@ uvicorn[standard]  # Web server
 python-multipart   # Để xử lý upload file video
 celery             # Hàng đợi
 redis==4.6.0
+minio
