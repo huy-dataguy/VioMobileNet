@@ -46,3 +46,15 @@ services:
     shm_size: '4gb'
     depends_on:
       - redis
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    ports:
+      - "8554:8554"        # RTSP
+      - "8888:8888"        # Web UI / HLS
+      - "8889:8889"        # API
+      - "1935:1935"        # RTMP
+      - "8000:8000"        # SRT / WebRTC signaling (nếu cần)
+      - "8001:8001"
+
