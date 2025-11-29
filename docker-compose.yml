@@ -55,6 +55,5 @@ services:
       - "8888:8888"        # Web UI / HLS
       - "8889:8889"        # API
       - "1935:1935"        # RTMP
-      - "8000:8000"        # SRT / WebRTC signaling (nếu cần)
       - "8001:8001"
 
