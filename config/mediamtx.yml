@@ -1,0 +1,42 @@
+###############################################
+# CẤU HÌNH MEDIA MTX (VPS 103.78.3.29)
+###############################################
+logLevel: info
+
+# 1. RTSP Server (Cổng nhập video từ Camera/Python)
+rtsp: yes
+rtspAddress: :8554
+
+# 2. RTMP (Không dùng thì tắt cho nhẹ)
+rtmp: no
+
+# 3. HLS (Dự phòng cho mobile/safari)
+hls: yes
+hlsAddress: :8888
+hlsAlwaysRemux: yes
+hlsSegmentDuration: 1s
+hlsSegmentCount: 5    # Giảm xuống 5 để đỡ tốn RAM, delay thấp hơn
+
+# 4. WebRTC (QUAN TRỌNG NHẤT - Để React xem mượt)
+webrtc: yes
+webrtcAddress: :8889
+
+# --- SỬA LỖI 1: CORS ---
+# Dùng dấu '*' để chấp nhận mọi web (Laptop, Mobile, Domain khác...)
+# Không được để 'localhost:3002' vì browser sẽ chặn khi gọi từ IP khác
+webrtcAllowOrigin: '*'
+
+# --- SỬA LỖI 2: ICE Candidates (BẮT BUỘC CHO VPS) ---
+# Đây là lỗi khiến video bị đen/xoay vòng vòng.
+# Bạn phải khai báo IP Công khai của VPS để Laptop biết đường gửi dữ liệu UDP về.
+webrtcICECandidates:
+  - 103.78.3.29:8189
+
+# Cổng UDP cho WebRTC (Mặc định là 8189, khai báo rõ ràng để mở Firewall)
+webrtcUDPAddress: :8189
+
+# -----------------------
+paths:
+  all:
+    source: publisher
+    maxReaders: 100 # Tăng lên xíu cho thoải mái
