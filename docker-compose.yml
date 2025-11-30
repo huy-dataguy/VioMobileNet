@@ -118,6 +118,8 @@ services:
       image: bluenviron/mediamtx:latest
       container_name: mediamtx
       network_mode: host
+      volumes:
+        - ./config/mediamtx.yml:/mediamtx.yml
 
   # --- MinIO Server (Dùng image chính thức) ---
   minio:
