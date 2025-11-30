@@ -1,31 +1,26 @@
-###############################################
-# CẤU HÌNH MEDIA MTX (CHO VPS 103.78.3.29)
-###############################################
-paths:
-  all:
-    source: publisher
-
-# LOGGING
 logLevel: info
 
-# RTSP (Input)
+# RTSP server (publisher sẽ push tới đây)
 rtsp: yes
 rtspAddress: :8554
 
-# RTMP (Disable cho nhẹ)
 rtmp: no
 
-# HLS (Output)
+# HLS global (dùng để serve .m3u8)
 hls: yes
 hlsAddress: :8888
-hlsSegmentCount: 5
+hlsAlwaysRemux: yes
 hlsSegmentDuration: 1s
+hlsSegmentCount: 10
 
-# WebRTC (Output - QUAN TRỌNG)
+# Cấu hình WebRTC (WHEP/WHIP)
 webrtc: yes
 webrtcAddress: :8889
+
 webrtcAllowOrigin: '*'
-# QUAN TRỌNG: Khai báo IP VPS để client biết đường kết nối UDP
-webrtcICECandidates:
-  - "103.78.3.29:8189"
-webrtcUDPAddress: :8189
+# -----------------------
+
+paths:
+  all:
+    source: publisher
+    maxReaders: 50
