@@ -2,6 +2,7 @@ import time
 import redis
 import json
 import cv2
+import os
 import tensorflow as tf
 import gc
 import base64
@@ -14,52 +15,58 @@ from minio.error import S3Error
 from core import build_model_optimized, preprocess_frame, run_inference_step
 
 r = redis.Redis(host='redis', port=6379, db=0)
+# --- CẤU HÌNH MINIO (Chạy trong Docker VPS) ---
 
-# --- CẤU HÌNH MINIO (Kết nối về Laptop) ---
-# Thay URL này bằng link Ngrok bạn vừa lấy (bỏ https:// đi)
-# Ví dụ: "abcd-123-456.ngrok-free.app"
-MINIO_ENDPOINT = "subquadrate-scot-monoeciously.ngrok-free.dev" 
-ACCESS_KEY = "minio"
-SECRET_KEY = "mypassword"
-BUCKET_NAME = "inference-results" # Bucket bạn đã tạo trong docker-compose
+# 1. Lấy thông tin từ biến môi trường (đã khai báo trong docker-compose.yml)
+# Nếu không tìm thấy biến môi trường thì dùng giá trị mặc định bên phải
+MINIO_INTERNAL_HOST = os.getenv("S3_ENDPOINT_URL", "http://minio:9000").replace("http://", "")
+ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
+SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "mypassword")
+BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "inference-results")
 
-# Khởi tạo MinIO Client
+# 2. Cấu hình IP Public để tạo link cho người dùng xem
+# Thay bằng IP VPS của bạn
+VPS_PUBLIC_IP = "103.78.3.29" 
+VPS_MINIO_PORT = "9000"
+
+# Khởi tạo MinIO Client (Kết nối nội bộ Docker)
 try:
     minio_client = Minio(
-        MINIO_ENDPOINT,
+        MINIO_INTERNAL_HOST, # Dùng "minio:9000"
         access_key=ACCESS_KEY,
         secret_key=SECRET_KEY,
-        secure=True # Ngrok dùng HTTPS nên để True
+        secure=False  # <--- QUAN TRỌNG: Đổi thành False vì nội bộ dùng HTTP
     )
-    # Kiểm tra bucket có tồn tại không
+    
+    # Kiểm tra bucket (thường Docker Compose đã tạo rồi, nhưng check cho chắc)
     if not minio_client.bucket_exists(BUCKET_NAME):
-        print(f"Bucket {BUCKET_NAME} không tồn tại (Laptop chưa bật?)")
-    else:
-        print(f"Đã kết nối tới MinIO trên Laptop!")
+        minio_client.make_bucket(BUCKET_NAME)
+        # Set policy public để xem được ảnh (nếu chưa set)
+        policy = '{"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"AWS":["*"]},"Action":["s3:GetObject"],"Resource":["arn:aws:s3:::%s/*"]}]}' % BUCKET_NAME
+        minio_client.set_bucket_policy(BUCKET_NAME, policy)
+        
+    print(f"✅ Đã kết nối tới MinIO Local ({MINIO_INTERNAL_HOST})")
 except Exception as e:
-    print(f"Lỗi kết nối MinIO: {e}")
+    print(f"❌ Lỗi kết nối MinIO: {e}")
     minio_client = None
 
-# --- HÀM UPLOAD MINIO (Chạy ngầm) ---
+# --- HÀM UPLOAD MINIO ---
 def upload_to_minio_async(frame, camera_id, timestamp):
     def _worker():
         if minio_client is None: return
         
         try:
-            # 1. Nén ảnh thành JPEG trong RAM
+            # 1. Nén ảnh
             _, buffer = cv2.imencode('.jpg', frame)
-            
-            # 2. Chuyển thành Bytes Stream
             data_stream = io.BytesIO(buffer)
             data_length = len(buffer)
             
-            # 3. Đặt tên file (Object Name)
-            # Cấu trúc: camera_id / ngày / giờ.jpg
+            # 2. Đặt tên file
             time_struct = time.localtime(timestamp)
             date_folder = time.strftime("%Y-%m-%d", time_struct)
             filename = f"{camera_id}/{date_folder}/{int(timestamp*1000)}.jpg"
             
-            # 4. Upload
+            # 3. Upload (Dùng mạng nội bộ Docker - siêu nhanh)
             minio_client.put_object(
                 BUCKET_NAME,
                 filename,
@@ -67,18 +74,16 @@ def upload_to_minio_async(frame, camera_id, timestamp):
                 data_length,
                 content_type="image/jpeg"
             )
-            # print(f"saved to minio: {filename}")
             
         except Exception as e:
             print(f"MinIO Upload Error: {e}")
 
-    # Chạy trên luồng riêng để không làm lag AI
     threading.Thread(target=_worker).start()
     
-    # Trả về đường dẫn công khai (nếu policy là public)
-    # Lưu ý: Link này chỉ sống khi Ngrok còn chạy
-    return f"https://{MINIO_ENDPOINT}/{BUCKET_NAME}/{filename}"
-
+    # 4. Trả về Link Public (Dùng IP VPS 103.78... để Client xem được)
+    # URL này dành cho trình duyệt/App bên ngoài
+    return f"http://{VPS_PUBLIC_IP}:{VPS_MINIO_PORT}/{BUCKET_NAME}/{filename}"
+    
 # --- CLASS RTSPStream (Giữ nguyên) ---
 class RTSPStream:
     def __init__(self, src):
