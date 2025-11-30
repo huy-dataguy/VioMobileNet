@@ -147,7 +147,7 @@ def run_camera_process(camera_id, rtsp_url):
     current_fps = 0.0
     inference_time_ms = 0.0
     alert_active = False # Trạng thái đang báo động
-    
+    last_evidence_url = None
     time.sleep(1) 
     
     while True:
@@ -220,6 +220,7 @@ def run_camera_process(camera_id, rtsp_url):
                     # Gửi frame gốc (Full HD) về laptop
                     # Dùng copy() để không bị xung đột luồng
                     evidence_url = upload_to_minio_async(frame.copy(), camera_id, now)
+                    last_evidence_url = evidence_url
             # ------------------------------------------
 
             # Gửi Client xem trước (Ảnh nhỏ Base64)
@@ -227,7 +228,12 @@ def run_camera_process(camera_id, rtsp_url):
             encode_param = [int(cv2.IMWRITE_JPEG_QUALITY), 40]
             _, buffer = cv2.imencode('.jpg', frame_view, encode_param)
             jpg_as_text = base64.b64encode(buffer).decode('utf-8')
-            
+
+            if evidence_url is None:
+                final_evidence_url = last_evidence_url
+            else:
+                final_evidence_url = evidence_url
+                
             result = {
                 "camera_id": camera_id,
                 "is_violent": is_violent,
@@ -235,7 +241,7 @@ def run_camera_process(camera_id, rtsp_url):
                 "fps": round(current_fps, 1),
                 "latency_ms": round(inference_time_ms, 1),
                 "image_preview": jpg_as_text, # Xem nhanh
-                "evidence_url": evidence_url, # Link tải ảnh gốc từ MinIO
+                "evidence_url": final_evidence_url, # Link tải ảnh gốc từ MinIO
                 "timestamp": now
             }
             
