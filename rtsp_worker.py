@@ -34,7 +34,7 @@ def run_camera_process(camera_id, rtsp_url):
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "mypassword")
     BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "inference-results")
-    VPS_PUBLIC_IP = "103.78.3.29" 
+    VPS_PUBLIC_IP = "103.78.3.32" 
     VPS_MINIO_PORT = "9000"
 
     minio_client = None
