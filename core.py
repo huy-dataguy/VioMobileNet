@@ -1,6 +1,7 @@
 import os
 import cv2
 import numpy as np
+
 import tensorflow as tf
 from official.projects.movinet.modeling import movinet, movinet_model
 
@@ -9,8 +10,21 @@ CHECKPOINT_DIR = './models/movinet_a3_12fps_64bs_0.001lr_0.3dr_0tl/'
 MODEL_ID = 'a3'
 RESOLUTION = 256
 
+def setup_gpu_config():
+    """Hàm này phải được gọi ĐẦU TIÊN trong mỗi Process"""
+    gpus = tf.config.list_physical_devices('GPU')
+    if gpus:
+        try:
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            print(f"GPU Configured: Memory Growth = True")
+        except RuntimeError as e:
+            print(f"GPU Config Error: {e}")
+
 def build_model_optimized():
-    """Hàm load model và weights vào GPU"""
+    """Hàm load model và weights"""
+    setup_gpu_config()
+    
     print(f"Building MoViNet {MODEL_ID}...")
     backbone = movinet.Movinet(
         model_id=MODEL_ID,
@@ -26,37 +40,27 @@ def build_model_optimized():
     model = movinet_model.MovinetClassifier(
         backbone, num_classes=2, output_states=True)
 
-    # Build input giả
     inputs = tf.ones([1, 1, RESOLUTION, RESOLUTION, 3])
     model.build(inputs.shape)
 
-    # Load weights
-    print(f"Loading weights from: {CHECKPOINT_DIR}")
-    # Fallback an toàn nếu không tìm thấy file
     if os.path.exists(CHECKPOINT_DIR):
         latest = tf.train.latest_checkpoint(CHECKPOINT_DIR)
         if latest:
              model.load_weights(latest).expect_partial()
-        else:
-             print("WARNING: No checkpoint found in dir, using random weights!")
     else:
         print(f"ERROR: Checkpoint dir not found: {CHECKPOINT_DIR}")
     
     return model
 
 def get_template_states(model):
-    """Tạo state rỗng ban đầu"""
     return model.init_states(tf.shape(tf.ones([1, 1, RESOLUTION, RESOLUTION, 3])))
 
 def preprocess_frame(frame, target_size=256):
-    """Chuẩn hóa 1 frame ảnh"""
     frame = cv2.resize(frame, (target_size, target_size))
     frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     frame = frame / 255.0
-    # Thêm batch dimension: (1, 1, H, W, 3)
     return tf.constant(frame[np.newaxis, np.newaxis, ...], dtype=tf.float32)
 
-# Wrap tf.function để tăng tốc inference
 @tf.function
 def run_inference_step(model, inputs, states):
     outputs = model({**inputs, **states})
