@@ -1,12 +1,12 @@
-version: '3.8'
-
 services:
-  redis:
+  redis_server_ai:
     image: redis:alpine
-    container_name: redis_server
-    ports: ["6379:6379"]
+    container_name: redis_server_ai
+    ports: ["6379:6379"] 
+    networks:
+      - violence-detection-net
 
-  api:
+  viomobilenet_api:
     build: .
     image: viomobilenet-system
     container_name: viomobilenet_api
@@ -15,26 +15,23 @@ services:
     volumes:
       - ./uploads:/app/uploads
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - TF_FORCE_GPU_ALLOW_GROWTH=true
-      - TF_GPU_ALLOCATOR=cuda_malloc_async
       - S3_ENDPOINT_URL=http://minio:9000
       - AWS_ACCESS_KEY_ID=minio
       - AWS_SECRET_ACCESS_KEY=mypassword
       - S3_BUCKET_NAME=inference-results
+    depends_on:
+      - redis_server_ai
+    networks:
+      - violence-detection-net
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
-    shm_size: '10gb'
-    depends_on:
-      - redis
-      - minio
 
-  worker:
+  viomobilenet_worker:
     build: .
     image: viomobilenet-system
     container_name: viomobilenet_worker
@@ -42,60 +39,22 @@ services:
     volumes:
       - ./uploads:/app/uploads
     environment:
-      - NVIDIA_VISIBLE_DEVICES=all
-      - TF_FORCE_GPU_ALLOW_GROWTH=true
-      - TF_GPU_ALLOCATOR=cuda_malloc_async
       - S3_ENDPOINT_URL=http://minio:9000
-      - AWS_ACCESS_KEY_ID=minio
-      - AWS_SECRET_ACCESS_KEY=mypassword
-      - S3_BUCKET_NAME=inference-results
+    depends_on:
+      - redis_server_ai
+    networks:
+      - violence-detection-net
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              count: 1
+              count: all
               capabilities: [gpu]
-    shm_size: '4gb'
-    depends_on:
-      - redis
-      - minio
 
-  mediamtx:
-      image: bluenviron/mediamtx:latest
-      container_name: mediamtx
-      network_mode: host
-      volumes:
-        - ./config/mediamtx.yml:/mediamtx.yml
 
-  minio:
-    image: minio/minio:latest
-    container_name: minio
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    environment:
-      - MINIO_ROOT_USER=minio
-      - MINIO_ROOT_PASSWORD=mypassword
-    volumes:
-      - minio_data:/data
-    command: server /data --console-address ":9001"
-    restart: unless-stopped
-
-  minio_client:
-    image: minio/mc:latest
-    container_name: minio_client
-    depends_on:
-      - minio
-    entrypoint: >
-      /bin/sh -c "
-        echo 'Waiting for MinIO...' &&
-        sleep 5 &&
-        mc alias set myminio http://minio:9000 minio mypassword &&
-        mc mb myminio/inference-results || true &&
-        mc anonymous set download myminio/inference-results || true &&
-        exit 0
-      "
-
-volumes:
-  minio_data:
+networks:
+  violence-detection-net:
+    name: violence-detection-net 
+    external: true 
+volumes: {}

@@ -5,9 +5,9 @@ import sys
 from datetime import datetime
 import base64 # <--- Thêm import này ở đầu file
 # IP VPS của bạn
-# URL = "http://103.78.3.29:8000/camera/status/cam1"
+# URL = "http://192.168.0.200:8000/camera/status/cam1"
 
-URL = "http://103.78.3.29:8000/camera/status/liveFight"
+URL = "http://192.168.0.200:8000/camera/status/liveFight"
 def clear_screen():
     os.system('cls' if os.name == 'nt' else 'clear')
 

@@ -11,8 +11,8 @@ from rtsp_worker import run_camera_process
 
 app = FastAPI(title="MoViNet Video & RTSP System")
 
-redis_client = redis.Redis(host='redis', port=6379, db=0)
-celery_client = Celery('video_tasks', broker='redis://redis:6379/0', backend='redis://redis:6379/0')
+redis_client = redis.Redis(host='redis_server_ai', port=6379, db=0)
+celery_client = Celery('video_tasks', broker='redis://redis_server_ai:6379/0', backend='redis://redis_server_ai:6379/0')
 
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)

@@ -27,14 +27,14 @@ def run_camera_process(camera_id, rtsp_url):
     setup_gpu_config()
 
     # Kết nối Redis (cần tạo kết nối mới trong process con)
-    r = redis.Redis(host='redis', port=6379, db=0)
+    r = redis.Redis(host='redis_server_ai', port=6379, db=0)
 
     # --- Cấu hình MinIO (Copy lại logic cũ) ---
     MINIO_INTERNAL_HOST = os.getenv("S3_ENDPOINT_URL", "minio:9000").replace("http://", "")
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "mypassword")
     BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "inference-results")
-    VPS_PUBLIC_IP = "103.78.3.32" 
+    VPS_PUBLIC_IP = "192.168.0.200" 
     VPS_MINIO_PORT = "9000"
 
     minio_client = None
@@ -62,6 +62,8 @@ def run_camera_process(camera_id, rtsp_url):
 
     class RTSPStream:
         def __init__(self, src):
+            # Ép FFmpeg sử dụng TCP transport cho RTSP
+            os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp'
             self.capture = cv2.VideoCapture(src)
             self.frame = None
             self.status, self.frame = self.capture.read()

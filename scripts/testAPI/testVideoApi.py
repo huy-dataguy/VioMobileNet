@@ -3,7 +3,7 @@ import time
 import sys
 
 # IP VPS của bạn
-API_URL = "http://103.78.3.29:8000"
+API_URL = "http://192.168.0.200:8000"
 # Nếu chạy ngay trên VPS mà lỗi kết nối, hãy thử đổi thành "http://localhost:8000"
 
 VIDEO_PATH = "./uploads/fight1.avi" 

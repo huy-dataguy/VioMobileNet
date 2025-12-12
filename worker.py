@@ -5,7 +5,7 @@ import tensorflow as tf
 from celery import Celery
 from core import build_model_optimized, get_template_states, run_inference_step, RESOLUTION, setup_gpu_config
 
-celery_app = Celery('video_tasks', broker='redis://redis:6379/0', backend='redis://redis:6379/0')
+celery_app = Celery('video_tasks', broker='redis://redis_server_ai:6379/0', backend='redis://redis_server_ai:6379/0')
 
 print("--- [UPLOAD WORKER] STARTING ---")
 
