@@ -46,6 +46,9 @@ services:
       - violence-detection-net
     deploy:
       resources:
+        limits:
+          cpus: '1.0'  
+          memory: 1G
         reservations:
           devices:
             - driver: nvidia
