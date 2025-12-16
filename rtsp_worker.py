@@ -30,11 +30,11 @@ def run_camera_process(camera_id, rtsp_url):
     r = redis.Redis(host='redis', port=6379, db=0)
 
     # --- Cấu hình MinIO (Copy lại logic cũ) ---
-    MINIO_INTERNAL_HOST = os.getenv("S3_ENDPOINT_URL", "minio:9000").replace("http://", "")
+    MINIO_INTERNAL_HOST = os.getenv("S3_ENDPOINT_URL", "minio-vps:9000").replace("http://", "")
     ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
     SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "mypassword")
     BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "inference-results")
-    VPS_PUBLIC_IP = "103.78.3.32" 
+    VPS_PUBLIC_IP = "192.168.1.5" 
     VPS_MINIO_PORT = "9000"
 
     minio_client = None

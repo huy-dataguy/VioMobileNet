@@ -7,8 +7,8 @@ import sys
 
 # ================= CẤU HÌNH =================
 # Thay đổi ID camera cho phù hợp với cái bạn đang start
-CAMERA_ID = "cam05" 
-API_URL = f"http://103.78.3.32:8000/camera/status/{CAMERA_ID}"
+CAMERA_ID = "cam01" 
+API_URL = f"http://192.168.1.5:8000/camera/status/{CAMERA_ID}"
 
 # Kích thước màn hình hiển thị mong muốn (Phóng to từ ảnh gốc 320x180)
 DISPLAY_WIDTH = 960

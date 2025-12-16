@@ -18,7 +18,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - TF_FORCE_GPU_ALLOW_GROWTH=true
       - TF_GPU_ALLOCATOR=cuda_malloc_async
-      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_ENDPOINT_URL=http://minio-vps:9000
       - AWS_ACCESS_KEY_ID=minio
       - AWS_SECRET_ACCESS_KEY=mypassword
       - S3_BUCKET_NAME=inference-results
@@ -32,7 +32,7 @@ services:
     shm_size: '10gb'
     depends_on:
       - redis
-      - minio
+      - minio-vps
 
   worker:
     build: .
@@ -45,7 +45,7 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - TF_FORCE_GPU_ALLOW_GROWTH=true
       - TF_GPU_ALLOCATOR=cuda_malloc_async
-      - S3_ENDPOINT_URL=http://minio:9000
+      - S3_ENDPOINT_URL=http://minio-vps:9000
       - AWS_ACCESS_KEY_ID=minio
       - AWS_SECRET_ACCESS_KEY=mypassword
       - S3_BUCKET_NAME=inference-results
@@ -59,18 +59,29 @@ services:
     shm_size: '4gb'
     depends_on:
       - redis
-      - minio
+      - minio-vps
+
+  # mediamtx-vps:
+  #     image: bluenviron/mediamtx:latest
+  #     container_name: mediamtx-vps
+  #     network_mode: host
+  #     volumes:
+  #       - ./config/mediamtx.yml:/mediamtx.yml
 
   mediamtx:
-      image: bluenviron/mediamtx:latest
-      container_name: mediamtx
-      network_mode: host
-      volumes:
-        - ./config/mediamtx.yml:/mediamtx.yml
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    volumes:
+      - ./config/mediamtx.yml:/mediamtx.yml
+    ports:
+      - "8554:8554"     # RTSP
+      - "8000:8000/udp" # RTP
+      - "8001:8001/udp" # RTCP
 
-  minio:
+
+  minio-vps:
     image: minio/minio:latest
-    container_name: minio
+    container_name: minio-vps
     ports:
       - "9000:9000"
       - "9001:9001"
@@ -78,24 +89,24 @@ services:
       - MINIO_ROOT_USER=minio
       - MINIO_ROOT_PASSWORD=mypassword
     volumes:
-      - minio_data:/data
+      - minio_data_vps:/data
     command: server /data --console-address ":9001"
     restart: unless-stopped
 
-  minio_client:
+  minio_client_vps:
     image: minio/mc:latest
-    container_name: minio_client
+    container_name: minio_client_vps
     depends_on:
-      - minio
+      - minio-vps
     entrypoint: >
       /bin/sh -c "
         echo 'Waiting for MinIO...' &&
         sleep 5 &&
-        mc alias set myminio http://minio:9000 minio mypassword &&
+        mc alias set myminio http://minio-vps:9000 minio mypassword &&
         mc mb myminio/inference-results || true &&
         mc anonymous set download myminio/inference-results || true &&
         exit 0
       "
 
 volumes:
-  minio_data:
+  minio_data_vps:
