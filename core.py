@@ -20,6 +20,9 @@ def setup_gpu_config():
             print(f"GPU Configured: Memory Growth = True")
         except RuntimeError as e:
             print(f"GPU Config Error: {e}")
+    # Ép mỗi tiến trình chỉ dùng 1 luồng, tránh xung đột CPU gây crash
+    tf.config.threading.set_inter_op_parallelism_threads(1)
+    tf.config.threading.set_intra_op_parallelism_threads(1)
 
 def build_model_optimized():
     """Hàm load model và weights"""

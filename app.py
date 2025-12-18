@@ -41,18 +41,16 @@ def get_result(task_id: str):
 @app.post("/camera/start")
 def start_camera(camera_id: str, rtsp_url: str):
     if camera_id in active_cameras:
-        if not active_cameras[camera_id].is_alive():
-            print(f"Camera {camera_id} was dead, restarting...")
-            del active_cameras[camera_id]
-        else:
-            return {"status": "error", "message": "Camera is already running"}
+        # Ép buộc dừng và xóa tiến trình cũ nếu nó không phản hồi
+        active_cameras[camera_id].terminate()
+        active_cameras[camera_id].join(timeout=1)
+        del active_cameras[camera_id]
+        print(f"Cleaning old zombie process for {camera_id}")
     
     redis_client.delete(f"stop_signal_{camera_id}")
-    
     p = Process(target=run_camera_process, args=(camera_id, rtsp_url))
     p.start()
     active_cameras[camera_id] = p
-    
     return {"status": "started", "pid": p.pid}
 
 @app.post("/camera/stop")

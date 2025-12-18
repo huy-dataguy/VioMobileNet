@@ -30,6 +30,9 @@ services:
             - driver: nvidia
               count: all
               capabilities: [gpu]
+        # limits:
+        #   memory: 2G # Ép API không được ăn quá 2GB
+        #   cpus: '1.0' # Giới hạn tổng CPU cho API
 
   viomobilenet_worker:
     build: .
@@ -48,7 +51,7 @@ services:
       resources:
         limits:
           cpus: '1.0'  
-          memory: 1G
+          memory: 2G
         reservations:
           devices:
             - driver: nvidia
