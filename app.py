@@ -3,20 +3,49 @@ import shutil
 import os
 import redis
 import json
+import time
 from celery import Celery
-from multiprocessing import Process
+import logging
+from multiprocessing import Process, Queue, Manager
 
+# Import các hàm worker mới từ rtsp_worker
+from rtsp_worker import run_inference_server, run_camera_streamer
+uvicorn_logger = logging.getLogger("uvicorn.access")
 
-from rtsp_worker import run_camera_process
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        # Nếu trong log message có chứa '/camera/status/', trả về False để không in log
+        return "/camera/status/" not in record.getMessage()
 
-app = FastAPI(title="MoViNet Video & RTSP System")
+# Thêm filter vào logger
+uvicorn_logger.addFilter(HealthCheckFilter())
+app = FastAPI(title="MoViNet Video & RTSP System - Shared Model Optimized")
 
+# Kết nối Redis
 redis_client = redis.Redis(host='redis_server_ai', port=6379, db=0)
-celery_client = Celery('video_tasks', broker='redis://redis_server_ai:6379/0', backend='redis://redis_server_ai:6379/0')
+celery_client = Celery('video_tasks', 
+                       broker='redis://redis_server_ai:6379/0', 
+                       backend='redis://redis_server_ai:6379/0')
 
+# Quản lý tài nguyên dùng chung
 UPLOAD_DIR = "uploads"
 os.makedirs(UPLOAD_DIR, exist_ok=True)
-active_cameras = {} 
+
+# Khởi tạo Queue và Manager để chia sẻ dữ liệu giữa các Process
+manager = Manager()
+input_queue = Queue(maxsize=150)  # Hàng đợi chứa frame từ các camera
+active_cameras = {}              # Lưu các process streamer
+
+@app.on_event("startup")
+def startup_event():
+    """
+    Khi API khởi động, chạy duy nhất 1 Inference Server duy nhất.
+    Server này sẽ load model MoViNet vào RAM (tốn ~1.2GB).
+    """
+    print("--- [SYSTEM] STARTING SHARED INFERENCE SERVER ---")
+    p = Process(target=run_inference_server, args=(input_queue,))
+    p.daemon = True # Tự động đóng khi app chính đóng
+    p.start()
 
 @app.post("/detect_video")
 async def detect_video(file: UploadFile = File(...)):
@@ -39,19 +68,28 @@ def get_result(task_id: str):
         return {"status": task_result.state}
 
 @app.post("/camera/start")
-def start_camera(camera_id: str, rtsp_url: str):
+def start_camera(camera_id: str, rtsp_url: str, risk_level: str = "low"):
+    """
+    Khởi động streamer cho camera. 
+    Process này cực nhẹ vì không load Model AI.
+    """
     if camera_id in active_cameras:
-        # Ép buộc dừng và xóa tiến trình cũ nếu nó không phản hồi
-        active_cameras[camera_id].terminate()
-        active_cameras[camera_id].join(timeout=1)
-        del active_cameras[camera_id]
-        print(f"Cleaning old zombie process for {camera_id}")
-    
+        if active_cameras[camera_id].is_alive():
+            return {"status": "already_running", "camera_id": camera_id}
+        else:
+            del active_cameras[camera_id]
+
     redis_client.delete(f"stop_signal_{camera_id}")
-    p = Process(target=run_camera_process, args=(camera_id, rtsp_url))
+    
+    # Khởi chạy streamer (Chỉ đọc RTSP và đẩy vào queue)
+    print(f"[DEBUG] API: Starting streamer for {camera_id} - Risk: {risk_level}")
+    print(f"[DEBUG] Current Queue Size: {input_queue.qsize()}") # Kiểm tra độ đầy của hàng đợi
+    p = Process(target=run_camera_streamer, args=(camera_id, rtsp_url, input_queue, risk_level))
+    
     p.start()
+    
     active_cameras[camera_id] = p
-    return {"status": "started", "pid": p.pid}
+    return {"status": "started", "camera_id": camera_id, "risk": risk_level}
 
 @app.post("/camera/stop")
 def stop_camera(camera_id: str):
@@ -59,11 +97,9 @@ def stop_camera(camera_id: str):
         return {"status": "error", "message": "Camera not found"}
     
     redis_client.set(f"stop_signal_{camera_id}", "1")
-    
     active_cameras[camera_id].join(timeout=2)
     
     if active_cameras[camera_id].is_alive():
-        print(f"Force killing camera {camera_id}")
         active_cameras[camera_id].terminate() 
         
     del active_cameras[camera_id]
@@ -71,12 +107,17 @@ def stop_camera(camera_id: str):
 
 @app.get("/camera/status/{camera_id}")
 def get_cam_status(camera_id: str):
+    """Đọc kết quả từ Redis (do Inference Server ghi vào)"""
     data = redis_client.get(f"cam_status_{camera_id}")
     if not data:
-        return {"status": "offline", "message": "No signal"}
+        return {"status": "offline", "message": "No signal from shared server"}
     return json.loads(data)
 
 @app.get("/system/active_cameras")
 def list_cameras():
     running = [cid for cid, p in active_cameras.items() if p.is_alive()]
-    return {"active_cameras": running}
+    return {
+        "active_cameras": running,
+        "queue_size": input_queue.qsize(),
+        "mode": "shared_inference_server"
+    }
