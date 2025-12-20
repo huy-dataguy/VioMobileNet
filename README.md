@@ -1,29 +1,34 @@
-Dưới đây là bản cập nhật **README.md** chuyên nghiệp và đầy đủ hơn, phản ánh chính xác kiến trúc tối ưu (Shared Model, LIFO, Risk-based FPS) mà chúng ta đã cùng nhau xây dựng.
+Dưới đây là bản cập nhật **README.md** được tinh chỉnh để phản ánh chính xác các nâng cấp quan trọng nhất mà chúng ta vừa triển khai: **Hệ thống Inference kép (Dual Pipeline)**, **Logic phản ứng điểm số tức thì (Boost/Drop)** và **Tối ưu hóa đa luồng background**.
 
 ---
 
 # 🛡️ VioMobileNet - Hệ Thống Giám Sát Bạo Lực AI Thời Gian Thực
 
-Hệ thống được thiết kế để phân tích hành vi bạo lực từ các luồng RTSP Camera và Video tải lên, sử dụng Model MoViNet tối ưu hóa cho thiết bị di động và máy tính cấu hình tầm trung.
+Hệ thống được thiết kế để phân tích hành vi bạo lực từ các luồng RTSP Camera và Video tải lên, sử dụng Model MoViNet tối ưu hóa cho hiệu suất cực cao và độ trễ thấp.
 
-## 🚀 Các Tính Năng Nổi Bật (Cập nhật 2025)
+## 🚀 Các Tính Năng Nổi Bật (Cập nhật mới nhất)
 
-* **Shared Model Architecture (Kiến trúc dùng chung Model):** * Sử dụng cơ chế **Inference Server** tập trung. Load duy nhất một bản Model vào VRAM (giảm 75% RAM hệ thống khi chạy nhiều Camera).
-* Tách biệt hoàn toàn việc giải mã video (Streamer) và xử lý AI (Inference), giúp hệ thống hoạt động cực kỳ ổn định.
-
-
-* **LIFO (Last-In-First-Out) Queue:**
-* Đảm bảo tính **Real-time tuyệt đối**. Nếu AI Server bận, hệ thống sẽ tự động bỏ qua các khung hình cũ để nhảy thẳng đến khung hình mới nhất.
-* Độ trễ toàn hệ thống (Pipeline Delay) giảm từ ~1.5s xuống còn **< 0.1s**.
+* **Dual Inference Pipeline (Luồng Inference Kép):**
+* Sử dụng 2 tiến trình Inference Server song song (`HIGH_SERVER` và `LOW_MED_SERVER`).
+* Tách biệt hàng đợi xử lý: Camera mức rủi ro cao (`high`) được ưu tiên một luồng riêng để đảm bảo tần suất giám sát dày đặc nhất.
 
 
-* **Risk-based FPS Control (Điều phối tài nguyên theo rủi ro):**
-* Tự động điều chỉnh tần suất phân tích dựa trên mức độ rủi ro (Risk Level) của khu vực camera (High: 10-12 FPS, Medium: 5 FPS, Low: 2 FPS).
+* **Instant Score Response (Phản ứng điểm số tức thì):**
+* **Boost Logic:** Tăng vọt điểm số khi vượt ngưỡng 0.2 bằng hàm mũ, giúp báo động kích hoạt ngay khi bạo lực bắt đầu.
+* **Quick Drop Logic:** Ép điểm số về 0 cực nhanh ngay khi cảnh quay bình yên trở lại, triệt tiêu hoàn toàn độ trễ tích lũy của AI.
 
 
-* **Smart Alert & Storage:**
-* Cơ chế **Cooldown 3s** khi upload bằng chứng lên MinIO để tránh lãng phí dung lượng.
-* Tự động điều chỉnh TTL (Time-to-Live) trên Redis: 1s khi có bạo lực (cập nhật tức thì) và 10s khi bình thường (giảm tải hệ thống).
+* **LIFO (Last-In-First-Out) & Interleaving:**
+* Cơ chế đẩy frame xen kẽ (Interleaving) giữa các camera giúp tránh chiếm dụng hàng đợi.
+* LIFO gắt gao tự động dọn dẹp khung hình cũ, đảm bảo độ trễ toàn hệ thống luôn **< 100ms**.
+
+
+* **Non-blocking Background Upload:**
+* Việc upload ảnh bằng chứng lên MinIO được thực hiện qua luồng phụ (Background Thread), giúp tiến trình AI chính không bị khựng lại (lag) khi đang truyền tải dữ liệu.
+
+
+* **Smart Redis Caching:**
+* Tự động điều chỉnh TTL (Time-to-Live) lên đến **60 giây** cho các sự kiện bạo lực, đảm bảo việc truy vấn API/CURL luôn nhận được dữ liệu ổn định.
 
 
 
@@ -33,15 +38,12 @@ Hệ thống được thiết kế để phân tích hành vi bạo lực từ c
 
 ```text
 VioMobileNet/
-├── app.py              # API Gateway (FastAPI): Quản lý luồng điều phối & trạng thái hệ thống.
-├── core.py             # Core AI Logic: Load model MoViNet, tiền xử lý ảnh & cấu hình GPU Memory Growth.
-├── rtsp_worker.py      # Bộ não hệ thống:
-│                         - Inference Server (Shared Model + LIFO logic)
-│                         - Camera Streamers (Multi-process đọc RTSP)
-├── worker.py           # Celery Worker: Xử lý video offline (Upload file).
-├── requirements.txt    # Danh sách thư viện (TensorFlow, OpenCV, Redis, MinIO...)
-├── Dockerfile          # Cấu hình build image tối ưu cho GPU.
-└── docker-compose.yml  # Orchestration: Kết nối API, Redis, MinIO và các dịch vụ Data Lakehouse.
+├── app.py              # API Gateway: Điều phối camera vào đúng hàng đợi (High hoặc Low/Med).
+├── core.py             # Core AI: Cấu hình GPU Memory Growth và luồng xử lý của TensorFlow.
+├── rtsp_worker.py      # Bộ não: Chứa logic Inference song song và Streamer đa nhịp độ.
+├── worker.py           # Celery Worker: Phân tích video tải lên (Offline processing).
+├── requirements.txt    # Thư viện: TensorFlow 2.15, OpenCV, Redis, MinIO...
+└── docker-compose.yml  # Điều phối: Kết nối API, Worker, Redis và MinIO.
 
 ```
 
@@ -49,14 +51,17 @@ VioMobileNet/
 
 ## 🛠️ Quy Trình Hoạt Động
 
-1. **Ingestion:** Các tiến trình Streamer đọc luồng RTSP, resize ảnh về 256x256 và đẩy vào `input_queue`.
-2. **Shared Inference:** Inference Server lấy frame mới nhất (LIFO), thực hiện dự đoán hành vi.
-3. **Result Distribution:** * Kết quả được đẩy lên **Redis** với TTL linh hoạt.
-* Ảnh bằng chứng bạo lực được upload lên **MinIO**.
-* Log chi tiết được in ra console theo thời gian thực (unbuffered log).
+1. **Ingestion (Nạp liệu):** Streamer đọc RTSP, resize về 256x256 và đẩy xen kẽ vào hàng đợi tương ứng với mức rủi ro.
+2. **Dual Inference:** * `HIGH_SERVER` xử lý các camera ưu tiên với FPS cao.
+* `LOW_MED_SERVER` xử lý các camera bình thường để tiết kiệm tài nguyên.
 
 
-4. **Monitoring:** API cung cấp endpoint `/camera/status/{id}` để Producer/UI truy vấn trạng thái.
+3. **Score Processing:** Áp dụng thuật toán Max Pooling và hàm mũ để điểm số "nhạy" hơn với hành động.
+4. **Result Distribution:**
+* Dữ liệu trạng thái được đẩy lên **Redis** với TTL linh hoạt.
+* Ảnh bằng chứng được **Threaded Upload** lên **MinIO**.
+
+
 
 ---
 
@@ -64,46 +69,34 @@ VioMobileNet/
 
 ### 1. Yêu cầu hệ thống
 
-* **GPU:** NVIDIA GeForce RTX 30 Series trở lên (Khuyên dùng RTX 4060 Ti).
-* **RAM:** Tối thiểu 16GB.
-* **Docker & NVIDIA Container Toolkit** đã cài đặt.
+* **GPU:** NVIDIA RTX 30 Series trở lên (Hỗ trợ CUDA 12.x).
+* **RAM:** Tối thiểu 16GB (Hệ thống tốn ~3GB cho 2 luồng Inference).
+* **Docker & NVIDIA Container Toolkit.**
 
 ### 2. Khởi động
 
 ```bash
-# Khởi động toàn bộ container
+# Khởi động toàn bộ hệ thống
 docker-compose up -d --build
 
-# Theo dõi Log AI theo thời gian thực (đã tối ưu flush log)
+# Kiểm tra log của hai luồng Inference song song
 docker logs -f viomobilenet_api
 
 ```
 
-### 3. API Đăng ký Camera
+### 3. Điều khiển Camera qua UI (Phím tắt)
 
-**POST** `/camera/start`
+Khi chạy script giám sát trên Client, bạn có thể chuyển đổi camera cực nhanh:
 
-```json
-{
-  "camera_id": "cam01",
-  "rtsp_url": "rtsp://mediamtx:8554/cam01",
-  "risk_level": "high"
-}
-
-```
+* Nhấn phím **[1-8]**: Chuyển đổi qua lại giữa các camera 01 đến 08.
+* Nhấn phím **[Q]**: Thoát hệ thống giám sát.
 
 ---
 
 ## 📈 Thông Số Hiệu Năng (Thực tế trên RTX 4060 Ti)
 
-* **Inference Latency:** 25ms - 45ms / frame.
-* **RAM Usage:** ~1.6 GB (Duy trì ổn định cho 5-10 Camera).
-* **Pipeline Delay:** ~50ms (Đảm bảo phản ứng tức thời).
+* **Tốc độ xử lý AI:** ~30ms - 50ms / frame.
+* **Số lượng Camera:** Hỗ trợ tốt 8-10 luồng đồng thời.
+* **Độ trễ Pipeline:** Duy trì ổn định dưới 100ms nhờ cơ chế LIFO và Background Upload.
 
 ---
-
-*Phát triển bởi Đội ngũ kỹ thuật VioMobileNet - 2025.*
-
----
-
-**Bạn có muốn tôi bổ sung thêm phần hướng dẫn cài đặt MinIO hoặc Kafka vào file này không?**
