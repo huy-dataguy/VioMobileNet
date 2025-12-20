@@ -3,7 +3,6 @@ import redis
 import json
 import cv2
 import os
-import gc
 import base64
 import numpy as np
 import threading
@@ -14,7 +13,7 @@ from minio import Minio
 # Kết nối Redis dùng chung
 r = redis.Redis(host='redis_server_ai', port=6379, db=0)
 
-# --- Cấu hình MinIO dùng chung ---
+# --- Cấu hình MinIO ---
 MINIO_INTERNAL_HOST = os.getenv("S3_ENDPOINT_URL", "minio:9000").replace("http://", "")
 ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
 SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "mypassword")
@@ -29,17 +28,10 @@ def get_minio_client():
         return None
 
 # =================================================================
-# PHẦN 1: INFERENCE SERVER (CHẠY DUY NHẤT 1 BẢN TRONG RAM)
+# PHẦN 1: INFERENCE SERVER (XỬ LÝ AI TẬP TRUNG)
 # =================================================================
-def run_inference_server(input_queue):
-    """
-    Inference Server tối ưu theo cơ chế LIFO.
-    Cập nhật: 
-    - Log ALERT liên tục khi có bạo lực.
-    - Ép in log (flush) để tránh delay log.
-    - Điều chỉnh TTL Redis: 1s khi bạo lực, 10s khi bình thường.
-    """
-    print("--- [SERVER] INITIALIZING SHARED MODEL (LIFO MODE) ---", flush=True)
+def run_inference_server(input_queue, server_label="SHARED_SERVER"):
+    print(f"--- [{server_label}] INITIALIZING MODEL ---", flush=True)
     import tensorflow as tf
     from core import build_model_optimized, preprocess_frame, run_inference_step, setup_gpu_config
     
@@ -55,19 +47,18 @@ def run_inference_server(input_queue):
     cam_last_upload = {}
     processed_count = 0
 
-    print("--- [SERVER] LIFO SHARED MODEL READY ---", flush=True)
+    print(f"--- [{server_label}] READY (LIFO MODE) ---", flush=True)
 
     while True:
-        # --- CHIẾN THUẬT LIFO: BỎ QUA FRAME CŨ ---
         q_size = input_queue.qsize()
-        item = None
+        if q_size > 15:
+            while q_size > 4: 
+                try:
+                    input_queue.get_nowait()
+                    q_size -= 1
+                except: break
         
-        if q_size > 0:
-            for _ in range(q_size):
-                item = input_queue.get()
-        else:
-            item = input_queue.get()
-
+        item = input_queue.get()
         if item is None: continue
 
         camera_id = item['camera_id']
@@ -75,9 +66,9 @@ def run_inference_server(input_queue):
         timestamp = item['timestamp']
 
         if camera_id not in cam_states:
-            print(f"[DEBUG LIFO] New camera detected: {camera_id}", flush=True)
+            print(f"[{server_label}] New camera detected: {camera_id}", flush=True)
             cam_states[camera_id] = get_clean_state()
-            cam_score_buffers[camera_id] = deque(maxlen=3)
+            cam_score_buffers[camera_id] = deque(maxlen=3) 
             cam_last_upload[camera_id] = 0
 
         try:
@@ -88,37 +79,48 @@ def run_inference_server(input_queue):
             probs = tf.nn.softmax(logits)
             raw_prob = float(probs[0][0])
             
-            # Max Pooling Score để tăng độ nhạy
+            # --- LOGIC PHẢN ỨNG CỰC NHANH (BOOST & DROP) ---
+            prev_avg = sum(cam_score_buffers[camera_id]) / len(cam_score_buffers[camera_id]) if cam_score_buffers[camera_id] else 0
             cam_score_buffers[camera_id].append(raw_prob)
-            final_prob = max(cam_score_buffers[camera_id])
             
-            is_violent = final_prob > 0.5
+            # Lấy giá trị trung bình trước đó từ bộ đệm
+            prev_avg = sum(cam_score_buffers[camera_id]) / len(cam_score_buffers[camera_id]) if cam_score_buffers[camera_id] else 0
+            cam_score_buffers[camera_id].append(raw_prob)
+
+            # 1. Tăng vọt khi có dấu hiệu bạo lực (vượt ngưỡng 0.2)
+            if raw_prob > 0.2:
+                processed_prob = raw_prob ** 0.8
+                # Sử dụng Max Pooling để giữ đỉnh cao nhất trong bộ đệm, tránh flicker
+                final_prob = max(processed_prob, sum(cam_score_buffers[camera_id])/len(cam_score_buffers[camera_id]))
+
+            # 2. Giảm khi chuyển sang cảnh bình yên 
+            elif raw_prob < prev_avg:
+                processed_prob = raw_prob ** 3
+                final_prob = processed_prob
+                
+            else:
+                processed_prob = raw_prob
+                final_prob = processed_prob
+            
+            is_violent = final_prob > 0.4 
             latency_ms = (time.time() - t0) * 1000
             
-            # 1. LOG ALERT BẠO LỰC LIÊN TỤC (Tách khỏi logic upload)
             if is_violent:
-                print(f"[ALERT] {camera_id} VIOLENCE ACTIVE | Score: {final_prob:.2f} | Time: {time.strftime('%H:%M:%S')}", flush=True)
+                r.setex(f"is_violent_status_{camera_id}", 2, "1")
+                print(f"[{server_label}][ALERT] {camera_id} ACTIVE | Score: {final_prob:.2f}", flush=True)
 
-            # 2. LOG DEBUG ĐỊNH KỲ (Mỗi 5 frame để mượt hơn)
-            processed_count += 1
-            if processed_count % 5 == 0:
-                pipeline_delay = (time.time() - timestamp) * 1000
-                print(f"[LIFO] {camera_id} | Infer: {latency_ms:.1f}ms | Delay: {pipeline_delay:.1f}ms | Skipped: {q_size-1}", flush=True)
-
-            # 3. LOG UPLOAD ẢNH (Cooldown 3s để tiết kiệm tài nguyên MinIO)
-            evidence_url = None
+            # Threaded Upload
             if is_violent:
                 if time.time() - cam_last_upload[camera_id] > 3.0:
-                    print(f"--- [UPLOAD] Saving evidence for {camera_id} ---", flush=True)
-                    evidence_url = upload_frame_to_minio(minio_client, frame, camera_id, timestamp)
+                    threading.Thread(
+                        target=upload_background, 
+                        args=(minio_client, frame.copy(), camera_id, timestamp, server_label)
+                    ).start()
                     cam_last_upload[camera_id] = time.time()
 
-            # 4. CẬP NHẬT KẾT QUẢ LÊN REDIS (Điều chỉnh TTL theo yêu cầu)
-            # Nếu bạo lực: TTL 1s (cập nhật nhanh)
-            # Nếu bình thường: TTL 10s
-            redis_ttl = 1 if is_violent else 10
-
-            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 30])
+            # Cập nhật Redis với TTL dài để phục vụ API
+            redis_ttl = 60 if is_violent else 30 
+            _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 25])
             jpg_as_text = base64.b64encode(buffer).decode('utf-8')
 
             result = {
@@ -127,41 +129,53 @@ def run_inference_server(input_queue):
                 "score": round(final_prob, 4),
                 "latency_ms": round(latency_ms, 1),
                 "image_preview": jpg_as_text, 
-                "evidence_url": evidence_url, 
-                "timestamp": timestamp,
-                "status": "violent" if is_violent else "normal"
+                "status": "violent" if is_violent else "normal",
+                "server": server_label,
+                "timestamp": timestamp
             }
-            
-            # Set kết quả với TTL tương ứng
             r.setex(f"cam_status_{camera_id}", redis_ttl, json.dumps(result))
 
+            processed_count += 1
+            if processed_count % 10 == 0:
+                delay = (time.time() - timestamp) * 1000
+                print(f"[{server_label}] {camera_id} | Infer: {latency_ms:.1f}ms | Delay: {delay:.1f}ms | Q: {input_queue.qsize()}", flush=True)
+
         except Exception as e:
-            print(f"[LIFO ERROR] {camera_id}: {e}", flush=True)
+            print(f"[{server_label} ERROR] {camera_id}: {e}", flush=True)
             cam_states[camera_id] = get_clean_state()
 
+def upload_background(client, frame, c_id, ts, server_label):
+    try:
+        url = upload_frame_to_minio(client, frame, c_id, ts)
+        if url:
+            print(f"--- [{server_label} UPLOAD SUCCESS] Evidence for {c_id} saved ---", flush=True)
+    except Exception as e:
+        print(f"[{server_label} UPLOAD FAILED] {e}", flush=True)
+
 # =================================================================
-# PHẦN 2: CAMERA STREAMER (CHẠY NHIỀU BẢN, CỰC NHẸ)
+# PHẦN 2: CAMERA STREAMER (LOGIC ĐẨY FRAME XEN KẼ)
 # =================================================================
 def run_camera_streamer(camera_id, rtsp_url, input_queue, risk_level):
-    print(f"--- [STREAMER {camera_id}] STARTING WITH RISK: {risk_level} ---")
     os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp'
     cap = cv2.VideoCapture(rtsp_url)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
 
-    # ĐỊNH NGHĨA FPS THEO RISK LEVEL
-    if risk_level.lower() == "high":
-        TARGET_FPS = 12  # Khu vực nóng: Xử lý dày để không sót
-    elif risk_level.lower() == "medium":
-        TARGET_FPS = 5   # Khu vực trung bình
-    else:
-        TARGET_FPS = 2   # Khu vực an toàn: Xử lý thưa để cứu CPU
+    FPS_MAP = {"high": 10, "medium": 4, "low": 2}
+    BASE_FPS = FPS_MAP.get(risk_level.lower(), 2)
+    
+    try:
+        cam_num = int(''.join(filter(str.isdigit, camera_id)))
+        time.sleep((cam_num % 8) * 0.05)
+    except:
+        time.sleep(0.1)
 
-    frame_interval = 1.0 / TARGET_FPS
     prev_time = 0
-
     while True:
-        if r.get(f"stop_signal_{camera_id}"): 
-            break
+        if r.get(f"stop_signal_{camera_id}"): break
+
+        is_active_violent = r.get(f"is_violent_status_{camera_id}")
+        target_fps = 12 if is_active_violent else BASE_FPS
+        frame_interval = 1.0 / target_fps
 
         ret, frame = cap.read()
         if not ret:
@@ -171,27 +185,17 @@ def run_camera_streamer(camera_id, rtsp_url, input_queue, risk_level):
         if now - prev_time >= frame_interval:
             prev_time = now
             small_frame = cv2.resize(frame, (256, 256))
-            
             if not input_queue.full():
-                input_queue.put({
-                    'camera_id': camera_id, 
-                    'frame': small_frame,
-                    'timestamp': now
-                })
-
+                input_queue.put({'camera_id': camera_id, 'frame': small_frame, 'timestamp': now})
+                time.sleep(0.005) 
     cap.release()
-    print(f"--- [STREAMER {camera_id}] STOPPED ---")
 
-# =================================================================
-# HÀM BỔ TRỢ
-# =================================================================
 def upload_frame_to_minio(client, frame, c_id, ts):
     if client is None: return None
     try:
         time_struct = time.localtime(ts)
         date_folder = time.strftime("%Y-%m-%d", time_struct)
         filename = f"{c_id}/{date_folder}/{int(ts*1000)}.jpg"
-        
         _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
         client.put_object(BUCKET_NAME, filename, io.BytesIO(buffer), len(buffer), content_type="image/jpeg")
         return f"http://{VPS_PUBLIC_IP}:{VPS_MINIO_PORT}/{BUCKET_NAME}/{filename}"
