@@ -61,6 +61,6 @@ services:
 
 networks:
   violence-detection-net:
-    name: violence-detection-net 
+    name: docker_violence-detection-net 
     external: true 
 volumes: {}

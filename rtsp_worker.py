@@ -18,7 +18,7 @@ MINIO_INTERNAL_HOST = os.getenv("S3_ENDPOINT_URL", "minio:9000").replace("http:/
 ACCESS_KEY = os.getenv("AWS_ACCESS_KEY_ID", "minio")
 SECRET_KEY = os.getenv("AWS_SECRET_ACCESS_KEY", "mypassword")
 BUCKET_NAME = os.getenv("S3_BUCKET_NAME", "inference-results")
-VPS_PUBLIC_IP = "192.168.0.200"
+VPS_PUBLIC_IP = "localhost"
 VPS_MINIO_PORT = "9000"
 
 def get_minio_client():
@@ -118,6 +118,8 @@ def run_inference_server(input_queue, server_label="SHARED_SERVER"):
                     ).start()
                     cam_last_upload[camera_id] = time.time()
 
+            current_evidence_url = upload_frame_to_minio(minio_client, frame, camera_id, timestamp) if is_violent else None
+
             # Cập nhật Redis với TTL dài để phục vụ API
             redis_ttl = 60 if is_violent else 30 
             _, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 25])
@@ -130,9 +132,13 @@ def run_inference_server(input_queue, server_label="SHARED_SERVER"):
                 "latency_ms": round(latency_ms, 1),
                 "image_preview": jpg_as_text, 
                 "status": "violent" if is_violent else "normal",
+                "evidence_url": current_evidence_url,
                 "server": server_label,
                 "timestamp": timestamp
             }
+
+        
+
             r.setex(f"cam_status_{camera_id}", redis_ttl, json.dumps(result))
 
             processed_count += 1

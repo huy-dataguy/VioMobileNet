@@ -7,7 +7,7 @@ import sys
 
 # Cấu hình danh sách camera
 CAM_LIST = [f"cam{i:02d}" for i in range(1, 9)]  # ['cam01', 'cam02', ..., 'cam08']
-BASE_URL = "http://192.168.0.200:8000/camera/status/"
+BASE_URL = "http://localhost:8000/camera/status/"
 
 def monitor_gui():
     current_cam_idx = 0  # Mặc định bắt đầu với cam01
