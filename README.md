@@ -95,7 +95,3 @@ Toggle between camera feeds instantly using keyboard shortcuts:
 * **AI Inference Speed:** ~30ms - 50ms per frame.
 * **Capacity:** Supports 8-10 simultaneous streams with high stability.
 * **Pipeline Latency:** Consistently maintained **< 100ms** via LIFO and Background Uploading.
-
----
-
-Would you like me to generate a specific **Docker Compose** configuration or a **Python** snippet for that exponential **Boost Logic** to include in your documentation?
